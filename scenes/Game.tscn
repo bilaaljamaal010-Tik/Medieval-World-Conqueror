@@ -1,0 +1,101 @@
+[gd_scene load_steps=4 format=3 uid="uid://bpk4k1uq3n105"]
+
+[ext_resource type="Script" path="res://scripts/Game.gd" id="1_2k0ya"]
+[ext_resource type="Script" path="res://scripts/CameraRig.gd" id="2_lmq1w"]
+
+[node name="Game" type="Node3D"]
+script = ExtResource("1_2k0ya")
+
+[node name="WorldRoot" type="Node3D" parent="."]
+
+[node name="Terrain" type="Node3D" parent="WorldRoot"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866025, -0.5, 0, 0.5, 0.866025, 0, 0, 0, 1, 0, 18, 0)
+light_energy = 1.5
+shadow_enabled = true
+
+[node name="CameraRig" type="Node3D" parent="."]
+script = ExtResource("2_lmq1w")
+
+[node name="Camera3D" type="Camera3D" parent="CameraRig"]
+transform = Transform3D(1, 0, 0, 0, 0.707106, 0.707107, 0, -0.707107, 0.707106, 0, 32, 32)
+current = true
+fov = 52.0
+
+[node name="CanvasLayer" type="CanvasLayer" parent="."]
+
+[node name="HUD" type="Control" parent="CanvasLayer"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="TopBar" type="Panel" parent="CanvasLayer/HUD"]
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 12.0
+offset_top = 12.0
+offset_right = -12.0
+offset_bottom = 68.0
+grow_horizontal = 2
+
+[node name="ResourceLabel" type="Label" parent="CanvasLayer/HUD/TopBar"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = 10.0
+offset_right = -16.0
+offset_bottom = -10.0
+text = "Gold: 0 | Food: 0 | Wood: 0 | Stone: 0 | Iron: 0 | Population: 0"
+
+[node name="Objectives" type="Panel" parent="CanvasLayer/HUD"]
+anchors_preset = 7
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -260.0
+offset_top = -170.0
+offset_right = -18.0
+offset_bottom = -18.0
+grow_horizontal = 0
+grow_vertical = 0
+
+[node name="ObjectivesLabel" type="Label" parent="CanvasLayer/HUD/Objectives"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 12.0
+offset_top = 12.0
+offset_right = -12.0
+offset_bottom = -12.0
+text = "Objectives\n- Expand your kingdom\n- secure food supply\n- bring the world under your rule"
+autowrap_mode = 3
+
+[node name="BottomBar" type="Panel" parent="CanvasLayer/HUD"]
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 12.0
+offset_top = -92.0
+offset_right = -12.0
+offset_bottom = -12.0
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="ActionsLabel" type="Label" parent="CanvasLayer/HUD/BottomBar"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 14.0
+offset_top = 10.0
+offset_right = -14.0
+offset_bottom = -10.0
+text = "Tap and drag to pan • Mouse wheel or pinch to zoom • Hold right mouse button to rotate camera • Space to pause"

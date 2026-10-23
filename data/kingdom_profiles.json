@@ -1,0 +1,8 @@
+{
+  "kingdom_profiles": [
+    {"id": 0, "name": "Your Kingdom", "personality": "balanced"},
+    {"id": 1, "name": "House Redcrest", "personality": "aggressive"},
+    {"id": 2, "name": "The Green Banner", "personality": "economic"},
+    {"id": 3, "name": "Cinder Vale", "personality": "defensive"}
+  ]
+}
