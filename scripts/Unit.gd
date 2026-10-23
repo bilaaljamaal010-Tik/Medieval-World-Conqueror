@@ -9,6 +9,19 @@ const STARTING_RESOURCES := {
     "iron": 1_000_000,
 }
 const PLAYER_UNIT_COUNT := 10
+const BUILDING_COSTS := {
+    "farm": {"food": 0, "wood": 80, "stone": 40, "iron": 10},
+    "house": {"food": 0, "wood": 100, "stone": 50, "iron": 15},
+    "lumber_camp": {"food": 0, "wood": 120, "stone": 60, "iron": 15},
+    "quarry": {"food": 0, "wood": 120, "stone": 80, "iron": 20},
+    "barracks": {"food": 0, "wood": 180, "stone": 120, "iron": 40},
+}
+const UNIT_COSTS := {
+    "infantry": {"gold": 80, "food": 30, "wood": 20, "stone": 10, "iron": 20},
+    "archer": {"gold": 110, "food": 30, "wood": 25, "stone": 10, "iron": 25},
+    "cavalry": {"gold": 180, "food": 45, "wood": 30, "stone": 20, "iron": 35},
+    "knight": {"gold": 260, "food": 60, "wood": 35, "stone": 25, "iron": 50},
+}
 
 var world_root: Node3D
 var terrain_root: Node3D
@@ -17,14 +30,34 @@ var city_nodes: Dictionary = {}
 var player_units: Array = []
 var enemy_units: Array = []
 var selected_units: Array = []
+var buildings: Array = []
+var active_build_type: String = ""
 var unit_scene: PackedScene = preload("res://scenes/Unit.tscn")
+var building_scene: PackedScene = preload("res://scenes/Building.tscn")
 var rng := RandomNumberGenerator.new()
 var paused := false
 var day_phase := 0.0
+var recruitment_panel_visible := false
 
 @onready var resource_label: Label = $CanvasLayer/HUD/TopBar/ResourceLabel
 @onready var objectives_label: Label = $CanvasLayer/HUD/Objectives/ObjectivesLabel
 @onready var army_status_label: Label = $CanvasLayer/HUD/BottomBar/ArmyStatusLabel
+@onready var city_status_label: Label = $CanvasLayer/HUD/BottomBar/CityStatusLabel
+@onready var build_farm_button: Button = $CanvasLayer/HUD/BuildPanel/FarmButton
+@onready var build_house_button: Button = $CanvasLayer/HUD/BuildPanel/HouseButton
+@onready var build_lumber_button: Button = $CanvasLayer/HUD/BuildPanel/LumberButton
+@onready var build_quarry_button: Button = $CanvasLayer/HUD/BuildPanel/QuarryButton
+@onready var build_barracks_button: Button = $CanvasLayer/HUD/BuildPanel/BarracksButton
+@onready var recruit_button: Button = $CanvasLayer/HUD/BuildPanel/RecruitButton
+@onready var recruit_panel: Panel = $CanvasLayer/HUD/RecruitPanel
+@onready var recruit_infantry_button: Button = $CanvasLayer/HUD/RecruitPanel/InfantryButton
+@onready var recruit_archer_button: Button = $CanvasLayer/HUD/RecruitPanel/ArcherButton
+@onready var recruit_cavalry_button: Button = $CanvasLayer/HUD/RecruitPanel/CavalryButton
+@onready var recruit_knight_button: Button = $CanvasLayer/HUD/RecruitPanel/KnightButton
+@onready var tax_slider: HSlider = $CanvasLayer/HUD/CityPanel/TaxSlider
+@onready var tax_value_label: Label = $CanvasLayer/HUD/CityPanel/TaxValue
+@onready var workers_slider: HSlider = $CanvasLayer/HUD/CityPanel/WorkersSlider
+@onready var workers_value_label: Label = $CanvasLayer/HUD/CityPanel/WorkersValue
 @onready var camera_rig: Node3D = $CameraRig
 
 func _ready() -> void:
@@ -34,7 +67,42 @@ func _ready() -> void:
     _generate_world()
     _spawn_player_units()
     _spawn_enemy_units()
+    _connect_build_buttons()
+    _connect_recruit_buttons()
+    _connect_city_controls()
+    _spawn_initial_city_buildings()
+    recruit_panel.visible = false
     _update_ui()
+
+func _connect_build_buttons() -> void:
+    build_farm_button.pressed.connect(_on_farm_button_pressed)
+    build_house_button.pressed.connect(_on_house_button_pressed)
+    build_lumber_button.pressed.connect(_on_lumber_button_pressed)
+    build_quarry_button.pressed.connect(_on_quarry_button_pressed)
+    build_barracks_button.pressed.connect(_on_barracks_button_pressed)
+    recruit_button.pressed.connect(_toggle_recruit_panel)
+
+func _connect_recruit_buttons() -> void:
+    recruit_infantry_button.pressed.connect(func(): _spawn_unit_of_type("infantry"))
+    recruit_archer_button.pressed.connect(func(): _spawn_unit_of_type("archer"))
+    recruit_cavalry_button.pressed.connect(func(): _spawn_unit_of_type("cavalry"))
+    recruit_knight_button.pressed.connect(func(): _spawn_unit_of_type("knight"))
+
+func _connect_city_controls() -> void:
+    tax_slider.value_changed.connect(_on_tax_changed)
+    workers_slider.value_changed.connect(_on_workers_changed)
+    _on_tax_changed(tax_slider.value)
+    _on_workers_changed(workers_slider.value)
+
+func _on_tax_changed(value: float) -> void:
+    tax_value_label.text = "Tax: %s%%" % str(int(value))
+
+func _on_workers_changed(value: float) -> void:
+    workers_value_label.text = "Workers: %s" % str(int(value))
+
+func _toggle_recruit_panel() -> void:
+    recruitment_panel_visible = !recruitment_panel_visible
+    recruit_panel.visible = recruitment_panel_visible
 
 func _process(delta: float) -> void:
     if paused:
@@ -115,6 +183,8 @@ func _generate_kingdoms() -> void:
             "relations": {},
             "military_power": rng.randi_range(20, 90),
             "ai_goal": ["expand", "trade", "defend", "fortify"][rng.randi_range(0, 3)],
+            "tax_rate": 15,
+            "workers": 20,
         }
 
         for city_index in range(1):
@@ -145,6 +215,12 @@ func _generate_kingdoms() -> void:
         player_kingdom["name"] = "Your Kingdom"
         player_kingdom["city_name"] = "Stonegate"
         objectives_label.text = "Objectives\n- Build a prosperous kingdom\n- Explore the world\n- Conquer or dominate the realm"
+
+func _spawn_initial_city_buildings() -> void:
+    _place_building_for_type("farm", Vector3(-22, 0.0, 12))
+    _place_building_for_type("house", Vector3(-15, 0.0, 12))
+    _place_building_for_type("lumber_camp", Vector3(-18, 0.0, 16))
+    _place_building_for_type("quarry", Vector3(-22, 0.0, 4))
 
 func _spawn_city_marker(city_data: Dictionary, color: Color) -> void:
     var city_root := Node3D.new()
@@ -217,9 +293,10 @@ func _update_world_simulation(delta: float) -> void:
             _simulate_ai_kingdom(kingdom, delta)
 
 func _simulate_player_kingdom(kingdom: Dictionary, delta: float) -> void:
-    kingdom["gold"] += int(12.0 * delta * 20.0)
-    kingdom["food"] += int(15.0 * delta * 20.0)
-    kingdom["wood"] += int(14.0 * delta * 20.0)
+    var tax_income := int(kingdom.get("population", 0) * float(kingdom.get("tax_rate", 15)) * 0.35)
+    kingdom["gold"] += int(12.0 * delta * 20.0) + tax_income
+    kingdom["food"] += int(15.0 * delta * 20.0) + int(kingdom.get("workers", 0) * 0.15)
+    kingdom["wood"] += int(14.0 * delta * 20.0) + int(kingdom.get("workers", 0) * 0.1)
     kingdom["stone"] += int(12.0 * delta * 12.0)
     kingdom["iron"] += int(15.0 * delta * 12.0)
     kingdom["population"] += int(delta * 0.8)
@@ -261,6 +338,79 @@ func _get_nearest_player_target(unit: Node3D) -> Node3D:
 
     return best_target
 
+func _spawn_unit_of_type(unit_type: String) -> void:
+    if not _can_afford(UNIT_COSTS.get(unit_type, {})):
+        return
+
+    _pay_cost(UNIT_COSTS.get(unit_type, {}))
+    var unit = unit_scene.instantiate()
+    unit.add_to_group("unit")
+    unit.team_id = 0
+    unit.unit_name = unit_type.capitalize()
+    unit.set_team_color(_get_unit_color(unit_type))
+    var spawn_pos := Vector3(-18, 0.5, 8) + Vector3(rng.randf_range(-2.0, 2.0), 0.0, rng.randf_range(-2.0, 2.0))
+    unit.global_position = spawn_pos
+    unit.move_speed = _get_unit_speed(unit_type)
+    unit.max_hp = _get_unit_hp(unit_type)
+    unit.hp = unit.max_hp
+    unit.attack_damage = _get_unit_damage(unit_type)
+    unit.attack_range = _get_unit_range(unit_type)
+    world_root.add_child(unit)
+    player_units.append(unit)
+    _update_ui()
+
+func _get_unit_color(unit_type: String) -> Color:
+    match unit_type:
+        "infantry": return Color(0.1, 0.75, 0.3)
+        "archer": return Color(0.85, 0.8, 0.25)
+        "cavalry": return Color(0.4, 0.55, 0.9)
+        "knight": return Color(0.75, 0.35, 0.15)
+        _: return Color(0.7, 0.7, 0.7)
+
+func _get_unit_speed(unit_type: String) -> float:
+    match unit_type:
+        "infantry": return 5.5
+        "archer": return 4.8
+        "cavalry": return 7.2
+        "knight": return 6.6
+        _: return 5.0
+
+func _get_unit_hp(unit_type: String) -> int:
+    match unit_type:
+        "infantry": return 28
+        "archer": return 22
+        "cavalry": return 34
+        "knight": return 48
+        _: return 20
+
+func _get_unit_damage(unit_type: String) -> int:
+    match unit_type:
+        "infantry": return 7
+        "archer": return 9
+        "cavalry": return 11
+        "knight": return 15
+        _: return 6
+
+func _get_unit_range(unit_type: String) -> float:
+    match unit_type:
+        "infantry": return 2.4
+        "archer": return 8.0
+        "cavalry": return 3.0
+        "knight": return 3.4
+        _: return 2.0
+
+func _can_afford(cost: Dictionary) -> bool:
+    var player_kingdom = kingdom_data[0]
+    for key in cost.keys():
+        if player_kingdom.get(key, 0) < int(cost[key]):
+            return false
+    return true
+
+func _pay_cost(cost: Dictionary) -> void:
+    var player_kingdom = kingdom_data[0]
+    for key in cost.keys():
+        player_kingdom[key] = int(player_kingdom.get(key, 0)) - int(cost[key])
+
 func format_number_display(value: int) -> String:
     if abs(value) >= 1000:
         var scaled := float(value) / 1000.0
@@ -287,11 +437,13 @@ func _update_ui() -> void:
         ]
     )
     army_status_label.text = "Army: %s" % format_number_display(player_units.size())
+    city_status_label.text = "City: Stonegate | Buildings: %s | Tax: %s%%" % [format_number_display(buildings.size()), str(player_kingdom.get("tax_rate", 15))]
 
 func save_game() -> void:
     var data := {
         "kingdoms": kingdom_data,
         "day_phase": day_phase,
+        "structures": buildings.size(),
     }
     var file := FileAccess.open("user://savegame.json", FileAccess.WRITE)
     if file:
@@ -326,10 +478,45 @@ func _input(event: InputEvent) -> void:
         load_game()
 
     if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+        if active_build_type != "":
+            _handle_build_placement(event.position)
+            return
         _handle_left_click(event.position)
 
     if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
         _handle_right_click(event.position)
+
+func _handle_build_placement(mouse_position: Vector2) -> void:
+    var ground_pos := _raycast_ground(mouse_position)
+    if ground_pos == null:
+        return
+    _place_building_for_type(active_build_type, ground_pos)
+
+func _raycast_ground(mouse_position: Vector2) -> Vector3:
+    var camera := get_viewport().get_camera_3d()
+    var from := camera.project_ray_origin(mouse_position)
+    var dir := camera.project_ray_normal(mouse_position)
+    var t := -from.y / dir.y
+    if is_nan(t) or is_inf(t):
+        return Vector3.ZERO
+    return from + dir * t
+
+func _place_building_for_type(building_type: String, position: Vector3) -> void:
+    if building_type == "":
+        return
+
+    var cost := BUILDING_COSTS.get(building_type, {})
+    if not _can_afford(cost):
+        return
+
+    _pay_cost(cost)
+    var building = building_scene.instantiate()
+    building.set_building_type(building_type)
+    building.global_position = position
+    world_root.add_child(building)
+    buildings.append(building)
+    active_build_type = ""
+    _update_ui()
 
 func _handle_left_click(mouse_position: Vector2) -> void:
     var camera := get_viewport().get_camera_3d()
@@ -342,8 +529,9 @@ func _handle_left_click(mouse_position: Vector2) -> void:
 
     if result and result.has("collider") and is_instance_valid(result["collider"]):
         var hit_node := result["collider"]
-        if hit_node.get_parent() != null and hit_node.get_parent().is_in_group("unit"):
-            _select_unit(hit_node.get_parent())
+        var parent := hit_node.get_parent()
+        if parent != null and parent.is_in_group("unit"):
+            _select_unit(parent)
             return
 
     _clear_selection()
@@ -362,8 +550,9 @@ func _handle_right_click(mouse_position: Vector2) -> void:
 
     var target_node = result["collider"]
     var target_entity: Node3D = null
-    if target_node.get_parent() != null and target_node.get_parent().is_in_group("unit"):
-        target_entity = target_node.get_parent()
+    var parent := target_node.get_parent()
+    if parent != null and parent.is_in_group("unit"):
+        target_entity = parent
 
     if target_entity != null and target_entity.team_id != 0:
         for unit in selected_units:
@@ -395,6 +584,21 @@ func _clear_selection() -> void:
             existing.set_selected(false)
     selected_units.clear()
     army_status_label.text = "Army: %s" % format_number_display(player_units.size())
+
+func _on_farm_button_pressed() -> void:
+    active_build_type = "farm"
+
+func _on_house_button_pressed() -> void:
+    active_build_type = "house"
+
+func _on_lumber_button_pressed() -> void:
+    active_build_type = "lumber_camp"
+
+func _on_quarry_button_pressed() -> void:
+    active_build_type = "quarry"
+
+func _on_barracks_button_pressed() -> void:
+    active_build_type = "barracks"
 
 func _unhandled_input(event: InputEvent) -> void:
     _input(event)

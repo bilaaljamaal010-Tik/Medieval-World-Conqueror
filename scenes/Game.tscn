@@ -83,7 +83,7 @@ anchors_preset = 2
 anchor_top = 1.0
 anchor_bottom = 1.0
 offset_left = 18.0
-offset_top = -170.0
+offset_top = -220.0
 offset_right = 330.0
 offset_bottom = -18.0
 grow_vertical = 0
@@ -133,12 +133,129 @@ offset_bottom = 202.0
 theme_override_font_sizes/font_size = 14
 text = "Barracks"
 
+[node name="RecruitButton" type="Button" parent="CanvasLayer/HUD/BuildPanel"]
+layout_mode = 0
+offset_left = 12.0
+offset_top = 212.0
+offset_right = 300.0
+offset_bottom = 242.0
+theme_override_font_sizes/font_size = 14
+text = "Recruit Units"
+
+[node name="RecruitPanel" type="Panel" parent="CanvasLayer/HUD"]
+visible = false
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 340.0
+offset_top = -220.0
+offset_right = 620.0
+offset_bottom = -18.0
+grow_vertical = 0
+
+[node name="InfantryButton" type="Button" parent="CanvasLayer/HUD/RecruitPanel"]
+layout_mode = 0
+offset_left = 12.0
+offset_top = 12.0
+offset_right = 268.0
+offset_bottom = 42.0
+text = "Infantry"
+
+[node name="ArcherButton" type="Button" parent="CanvasLayer/HUD/RecruitPanel"]
+layout_mode = 0
+offset_left = 12.0
+offset_top = 52.0
+offset_right = 268.0
+offset_bottom = 82.0
+text = "Archer"
+
+[node name="CavalryButton" type="Button" parent="CanvasLayer/HUD/RecruitPanel"]
+layout_mode = 0
+offset_left = 12.0
+offset_top = 92.0
+offset_right = 268.0
+offset_bottom = 122.0
+text = "Cavalry"
+
+[node name="KnightButton" type="Button" parent="CanvasLayer/HUD/RecruitPanel"]
+layout_mode = 0
+offset_left = 12.0
+offset_top = 132.0
+offset_right = 268.0
+offset_bottom = 162.0
+text = "Knight"
+
+[node name="CityPanel" type="Panel" parent="CanvasLayer/HUD"]
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -300.0
+offset_top = -220.0
+offset_right = -18.0
+offset_bottom = -18.0
+grow_horizontal = 0
+grow_vertical = 0
+
+[node name="TaxLabel" type="Label" parent="CanvasLayer/HUD/CityPanel"]
+layout_mode = 0
+offset_left = 12.0
+offset_top = 12.0
+offset_right = 280.0
+offset_bottom = 36.0
+text = "City Tax"
+
+[node name="TaxSlider" type="HSlider" parent="CanvasLayer/HUD/CityPanel"]
+layout_mode = 0
+offset_left = 12.0
+offset_top = 42.0
+offset_right = 280.0
+offset_bottom = 58.0
+min_value = 5.0
+max_value = 40.0
+value = 15.0
+
+[node name="TaxValue" type="Label" parent="CanvasLayer/HUD/CityPanel"]
+layout_mode = 0
+offset_left = 12.0
+offset_top = 66.0
+offset_right = 280.0
+offset_bottom = 86.0
+text = "Tax: 15%"
+
+[node name="WorkersLabel" type="Label" parent="CanvasLayer/HUD/CityPanel"]
+layout_mode = 0
+offset_left = 12.0
+offset_top = 96.0
+offset_right = 280.0
+offset_bottom = 120.0
+text = "Workers"
+
+[node name="WorkersSlider" type="HSlider" parent="CanvasLayer/HUD/CityPanel"]
+layout_mode = 0
+offset_left = 12.0
+offset_top = 126.0
+offset_right = 280.0
+offset_bottom = 142.0
+min_value = 0.0
+max_value = 100.0
+value = 20.0
+
+[node name="WorkersValue" type="Label" parent="CanvasLayer/HUD/CityPanel"]
+layout_mode = 0
+offset_left = 12.0
+offset_top = 150.0
+offset_right = 280.0
+offset_bottom = 170.0
+text = "Workers: 20"
+
 [node name="BottomBar" type="Panel" parent="CanvasLayer/HUD"]
 anchors_preset = 12
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 350.0
+offset_left = 640.0
 offset_top = -92.0
 offset_right = -12.0
 offset_bottom = -12.0
@@ -153,7 +270,7 @@ offset_left = 14.0
 offset_top = 10.0
 offset_right = -14.0
 offset_bottom = -10.0
-text = "Left-click to select units • Right-click to move/attack • Build mode: click on ground to place a building"
+text = "Select units • move/attack • build cities • recruit troops • set taxes/workers"
 
 [node name="ArmyStatusLabel" type="Label" parent="CanvasLayer/HUD/BottomBar"]
 anchors_preset = 11
