@@ -1,293 +1,92 @@
-[gd_scene load_steps=4 format=3 uid="uid://bpk4k1uq3n105"]
+extends CharacterBody3D
 
-[ext_resource type="Script" path="res://scripts/Game.gd" id="1_2k0ya"]
-[ext_resource type="Script" path="res://scripts/CameraRig.gd" id="2_lmq1w"]
+@export var move_speed: float = 6.0
+@export var max_hp: int = 30
+@export var attack_damage: int = 8
+@export var attack_range: float = 2.6
+@export var attack_cooldown: float = 0.9
 
-[node name="Game" type="Node3D"]
-script = ExtResource("1_2k0ya")
+var team_id: int = 0
+var unit_name: String = "Infantry"
+var is_enemy: bool = false
+var move_target: Vector3 = Vector3.ZERO
+var attack_target: Node3D = null
+var selected: bool = false
+var body_mesh: MeshInstance3D
+var selection_ring: MeshInstance3D
+var hp: int = max_hp
+var attack_timer: float = 0.0
+var formation_slot: int = 0
 
-[node name="WorldRoot" type="Node3D" parent="."]
+func _ready() -> void:
+    add_to_group("unit")
+    body_mesh = $Body
+    selection_ring = $SelectionRing
+    selection_ring.visible = false
+    if body_mesh != null:
+        var material := StandardMaterial3D.new()
+        material.albedo_color = Color(0.1, 0.7, 0.3)
+        body_mesh.material_override = material
 
-[node name="Terrain" type="Node3D" parent="WorldRoot"]
+func set_team_color(color: Color) -> void:
+    if body_mesh != null:
+        var material := StandardMaterial3D.new()
+        material.albedo_color = color
+        body_mesh.material_override = material
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+func set_selected(value: bool) -> void:
+    selected = value
+    if selection_ring != null:
+        selection_ring.visible = value
 
-[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
-transform = Transform3D(0.866025, -0.5, 0, 0.5, 0.866025, 0, 0, 0, 1, 0, 18, 0)
-light_energy = 1.5
-shadow_enabled = true
+func move_to(world_position: Vector3) -> void:
+    move_target = world_position
+    attack_target = null
 
-[node name="CameraRig" type="Node3D" parent="."]
-script = ExtResource("2_lmq1w")
+func set_attack_target(target: Node3D) -> void:
+    attack_target = target
+    move_target = Vector3.ZERO
 
-[node name="Camera3D" type="Camera3D" parent="CameraRig"]
-transform = Transform3D(1, 0, 0, 0, 0.707106, 0.707107, 0, -0.707107, 0.707106, 0, 32, 32)
-current = true
-fov = 52.0
+func apply_damage(amount: int) -> void:
+    hp -= amount
+    if hp <= 0:
+        queue_free()
 
-[node name="CanvasLayer" type="CanvasLayer" parent="."]
+func _physics_process(delta: float) -> void:
+    if is_instance_valid(attack_target) and attack_target != null:
+        var direction := attack_target.global_position - global_position
+        direction.y = 0.0
+        var distance := direction.length()
+        if distance <= attack_range:
+            attack_timer -= delta
+            if attack_timer <= 0.0:
+                if is_instance_valid(attack_target):
+                    attack_target.apply_damage(attack_damage)
+                attack_timer = attack_cooldown
+            velocity = Vector3.ZERO
+            move_and_slide()
+            return
 
-[node name="HUD" type="Control" parent="CanvasLayer"]
-layout_mode = 3
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
+    if move_target != Vector3.ZERO:
+        var direction := move_target - global_position
+        direction.y = 0.0
+        if direction.length() > 0.25:
+            if formation_slot > 0:
+                var formation_offset := Vector3((formation_slot % 3) * 1.8, 0.0, (formation_slot / 3) * 1.8)
+                if direction.length() > 0.1:
+                    velocity = direction.normalized() * move_speed + formation_offset * 0.25
+            else:
+                velocity = direction.normalized() * move_speed
+            move_and_slide()
+        else:
+            velocity = Vector3.ZERO
+            move_target = Vector3.ZERO
+    else:
+        velocity = Vector3.ZERO
 
-[node name="TopBar" type="Panel" parent="CanvasLayer/HUD"]
-anchors_preset = 10
-anchor_right = 1.0
-offset_left = 12.0
-offset_top = 12.0
-offset_right = -12.0
-offset_bottom = 68.0
-grow_horizontal = 2
+func _process(delta: float) -> void:
+    if selected and selection_ring != null:
+        selection_ring.rotation_degrees.x = 90.0
+    if attack_timer > 0.0:
+        attack_timer = max(0.0, attack_timer - delta)
 
-[node name="ResourceLabel" type="Label" parent="CanvasLayer/HUD/TopBar"]
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = 16.0
-offset_top = 10.0
-offset_right = -16.0
-offset_bottom = -10.0
-text = "Gold: 0 | Food: 0 | Wood: 0 | Stone: 0 | Iron: 0 | Population: 0"
-
-[node name="Objectives" type="Panel" parent="CanvasLayer/HUD"]
-anchors_preset = 7
-anchor_left = 1.0
-anchor_top = 1.0
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = -260.0
-offset_top = -170.0
-offset_right = -18.0
-offset_bottom = -18.0
-grow_horizontal = 0
-grow_vertical = 0
-
-[node name="ObjectivesLabel" type="Label" parent="CanvasLayer/HUD/Objectives"]
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = 12.0
-offset_top = 12.0
-offset_right = -12.0
-offset_bottom = -12.0
-text = "Objectives\n- Expand your kingdom\n- secure food supply\n- bring the world under your rule"
-autowrap_mode = 3
-
-[node name="BuildPanel" type="Panel" parent="CanvasLayer/HUD"]
-anchors_preset = 2
-anchor_top = 1.0
-anchor_bottom = 1.0
-offset_left = 18.0
-offset_top = -220.0
-offset_right = 330.0
-offset_bottom = -18.0
-grow_vertical = 0
-
-[node name="FarmButton" type="Button" parent="CanvasLayer/HUD/BuildPanel"]
-layout_mode = 0
-offset_left = 12.0
-offset_top = 12.0
-offset_right = 300.0
-offset_bottom = 42.0
-theme_override_font_sizes/font_size = 14
-text = "Farm"
-
-[node name="HouseButton" type="Button" parent="CanvasLayer/HUD/BuildPanel"]
-layout_mode = 0
-offset_left = 12.0
-offset_top = 52.0
-offset_right = 300.0
-offset_bottom = 82.0
-theme_override_font_sizes/font_size = 14
-text = "House"
-
-[node name="LumberButton" type="Button" parent="CanvasLayer/HUD/BuildPanel"]
-layout_mode = 0
-offset_left = 12.0
-offset_top = 92.0
-offset_right = 300.0
-offset_bottom = 122.0
-theme_override_font_sizes/font_size = 14
-text = "Lumber Camp"
-
-[node name="QuarryButton" type="Button" parent="CanvasLayer/HUD/BuildPanel"]
-layout_mode = 0
-offset_left = 12.0
-offset_top = 132.0
-offset_right = 300.0
-offset_bottom = 162.0
-theme_override_font_sizes/font_size = 14
-text = "Quarry"
-
-[node name="BarracksButton" type="Button" parent="CanvasLayer/HUD/BuildPanel"]
-layout_mode = 0
-offset_left = 12.0
-offset_top = 172.0
-offset_right = 300.0
-offset_bottom = 202.0
-theme_override_font_sizes/font_size = 14
-text = "Barracks"
-
-[node name="RecruitButton" type="Button" parent="CanvasLayer/HUD/BuildPanel"]
-layout_mode = 0
-offset_left = 12.0
-offset_top = 212.0
-offset_right = 300.0
-offset_bottom = 242.0
-theme_override_font_sizes/font_size = 14
-text = "Recruit Units"
-
-[node name="RecruitPanel" type="Panel" parent="CanvasLayer/HUD"]
-visible = false
-anchors_preset = 2
-anchor_top = 1.0
-anchor_bottom = 1.0
-offset_left = 340.0
-offset_top = -220.0
-offset_right = 620.0
-offset_bottom = -18.0
-grow_vertical = 0
-
-[node name="InfantryButton" type="Button" parent="CanvasLayer/HUD/RecruitPanel"]
-layout_mode = 0
-offset_left = 12.0
-offset_top = 12.0
-offset_right = 268.0
-offset_bottom = 42.0
-text = "Infantry"
-
-[node name="ArcherButton" type="Button" parent="CanvasLayer/HUD/RecruitPanel"]
-layout_mode = 0
-offset_left = 12.0
-offset_top = 52.0
-offset_right = 268.0
-offset_bottom = 82.0
-text = "Archer"
-
-[node name="CavalryButton" type="Button" parent="CanvasLayer/HUD/RecruitPanel"]
-layout_mode = 0
-offset_left = 12.0
-offset_top = 92.0
-offset_right = 268.0
-offset_bottom = 122.0
-text = "Cavalry"
-
-[node name="KnightButton" type="Button" parent="CanvasLayer/HUD/RecruitPanel"]
-layout_mode = 0
-offset_left = 12.0
-offset_top = 132.0
-offset_right = 268.0
-offset_bottom = 162.0
-text = "Knight"
-
-[node name="CityPanel" type="Panel" parent="CanvasLayer/HUD"]
-anchors_preset = 3
-anchor_left = 1.0
-anchor_top = 1.0
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = -300.0
-offset_top = -220.0
-offset_right = -18.0
-offset_bottom = -18.0
-grow_horizontal = 0
-grow_vertical = 0
-
-[node name="TaxLabel" type="Label" parent="CanvasLayer/HUD/CityPanel"]
-layout_mode = 0
-offset_left = 12.0
-offset_top = 12.0
-offset_right = 280.0
-offset_bottom = 36.0
-text = "City Tax"
-
-[node name="TaxSlider" type="HSlider" parent="CanvasLayer/HUD/CityPanel"]
-layout_mode = 0
-offset_left = 12.0
-offset_top = 42.0
-offset_right = 280.0
-offset_bottom = 58.0
-min_value = 5.0
-max_value = 40.0
-value = 15.0
-
-[node name="TaxValue" type="Label" parent="CanvasLayer/HUD/CityPanel"]
-layout_mode = 0
-offset_left = 12.0
-offset_top = 66.0
-offset_right = 280.0
-offset_bottom = 86.0
-text = "Tax: 15%"
-
-[node name="WorkersLabel" type="Label" parent="CanvasLayer/HUD/CityPanel"]
-layout_mode = 0
-offset_left = 12.0
-offset_top = 96.0
-offset_right = 280.0
-offset_bottom = 120.0
-text = "Workers"
-
-[node name="WorkersSlider" type="HSlider" parent="CanvasLayer/HUD/CityPanel"]
-layout_mode = 0
-offset_left = 12.0
-offset_top = 126.0
-offset_right = 280.0
-offset_bottom = 142.0
-min_value = 0.0
-max_value = 100.0
-value = 20.0
-
-[node name="WorkersValue" type="Label" parent="CanvasLayer/HUD/CityPanel"]
-layout_mode = 0
-offset_left = 12.0
-offset_top = 150.0
-offset_right = 280.0
-offset_bottom = 170.0
-text = "Workers: 20"
-
-[node name="BottomBar" type="Panel" parent="CanvasLayer/HUD"]
-anchors_preset = 12
-anchor_top = 1.0
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = 640.0
-offset_top = -92.0
-offset_right = -12.0
-offset_bottom = -12.0
-grow_horizontal = 2
-grow_vertical = 0
-
-[node name="ActionsLabel" type="Label" parent="CanvasLayer/HUD/BottomBar"]
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = 14.0
-offset_top = 10.0
-offset_right = -14.0
-offset_bottom = -10.0
-text = "Select units • move/attack • build cities • recruit troops • set taxes/workers"
-
-[node name="ArmyStatusLabel" type="Label" parent="CanvasLayer/HUD/BottomBar"]
-anchors_preset = 11
-anchor_left = 1.0
-anchor_right = 1.0
-offset_left = -220.0
-offset_top = 6.0
-offset_right = -18.0
-offset_bottom = 28.0
-text = "Army: 10"
-
-[node name="CityStatusLabel" type="Label" parent="CanvasLayer/HUD/BottomBar"]
-anchors_preset = 11
-anchor_left = 1.0
-anchor_right = 1.0
-offset_left = -220.0
-offset_top = 30.0
-offset_right = -18.0
-offset_bottom = 52.0
-text = "City: Stonegate | Buildings: 0"

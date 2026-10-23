@@ -22,6 +22,8 @@ const UNIT_COSTS := {
     "cavalry": {"gold": 180, "food": 45, "wood": 30, "stone": 20, "iron": 35},
     "knight": {"gold": 260, "food": 60, "wood": 35, "stone": 25, "iron": 50},
 }
+const CITY_CAPTURE_DISTANCE := 5.0
+const FOG_VISIBILITY_RADIUS := 24.0
 
 var world_root: Node3D
 var terrain_root: Node3D
@@ -65,6 +67,7 @@ func _ready() -> void:
     world_root = $WorldRoot
     terrain_root = $WorldRoot/Terrain
     _generate_world()
+    _initialize_diplomacy()
     _spawn_player_units()
     _spawn_enemy_units()
     _connect_build_buttons()
@@ -95,9 +98,13 @@ func _connect_city_controls() -> void:
     _on_workers_changed(workers_slider.value)
 
 func _on_tax_changed(value: float) -> void:
+    var player_kingdom := _get_player_kingdom()
+    player_kingdom["tax_rate"] = int(value)
     tax_value_label.text = "Tax: %s%%" % str(int(value))
 
 func _on_workers_changed(value: float) -> void:
+    var player_kingdom := _get_player_kingdom()
+    player_kingdom["workers"] = int(value)
     workers_value_label.text = "Workers: %s" % str(int(value))
 
 func _toggle_recruit_panel() -> void:
@@ -110,6 +117,9 @@ func _process(delta: float) -> void:
 
     day_phase += delta * 0.08
     _update_world_simulation(delta)
+    _update_diplomacy(delta)
+    _check_city_capture()
+    _update_fog_of_war()
     _update_ai_units(delta)
     _update_ui()
 
@@ -185,6 +195,8 @@ func _generate_kingdoms() -> void:
             "ai_goal": ["expand", "trade", "defend", "fortify"][rng.randi_range(0, 3)],
             "tax_rate": 15,
             "workers": 20,
+            "diplomacy_state": "neutral",
+            "war_state": false,
         }
 
         for city_index in range(1):
@@ -216,6 +228,90 @@ func _generate_kingdoms() -> void:
         player_kingdom["city_name"] = "Stonegate"
         objectives_label.text = "Objectives\n- Build a prosperous kingdom\n- Explore the world\n- Conquer or dominate the realm"
 
+    _initialize_diplomacy()
+
+func _initialize_diplomacy() -> void:
+    for kingdom in kingdom_data:
+        kingdom["relations"] = {}
+        for other in kingdom_data:
+            if kingdom["id"] == other["id"]:
+                continue
+            var relation_value := -15 + rng.randi_range(-30, 30)
+            if kingdom["is_player"]:
+                relation_value = -40 + rng.randi_range(0, 40)
+            if other["is_player"]:
+                relation_value = -40 + rng.randi_range(0, 40)
+            kingdom["relations"][str(other["id"])] = relation_value
+            if relation_value > 60:
+                kingdom["diplomacy_state"] = "allied"
+            elif relation_value < -30:
+                kingdom["diplomacy_state"] = "war"
+            else:
+                kingdom["diplomacy_state"] = "neutral"
+
+func _get_player_kingdom() -> Dictionary:
+    for kingdom in kingdom_data:
+        if kingdom["is_player"]:
+            return kingdom
+    return kingdom_data[0]
+
+func _get_kingdom_by_id(kingdom_id: int) -> Dictionary:
+    for kingdom in kingdom_data:
+        if kingdom["id"] == kingdom_id:
+            return kingdom
+    return {}
+
+func _get_relation_value(source_id: int, target_id: int) -> int:
+    var source = _get_kingdom_by_id(source_id)
+    if source.is_empty():
+        return 0
+    return int(source.get("relations", {}).get(str(target_id), 0))
+
+func _set_relation(source_id: int, target_id: int, value: int) -> void:
+    var source = _get_kingdom_by_id(source_id)
+    var target = _get_kingdom_by_id(target_id)
+    if source.is_empty() or target.is_empty():
+        return
+    source["relations"][str(target_id)] = value
+    target["relations"][str(source_id)] = value
+
+func _update_diplomacy(delta: float) -> void:
+    var player_kingdom := _get_player_kingdom()
+    for kingdom in kingdom_data:
+        if kingdom["is_player"]:
+            continue
+
+        var relation := _get_relation_value(player_kingdom["id"], kingdom["id"])
+        if relation <= -30:
+            kingdom["diplomacy_state"] = "war"
+            kingdom["war_state"] = true
+            if rng.randf() < 0.02:
+                player_kingdom["gold"] -= 1200
+                kingdom["gold"] += 1200
+                _set_relation(player_kingdom["id"], kingdom["id"], relation + 8)
+        elif relation >= 60:
+            kingdom["diplomacy_state"] = "allied"
+            kingdom["war_state"] = false
+            if rng.randf() < 0.03:
+                player_kingdom["gold"] += 800
+                kingdom["gold"] -= 800
+                _set_relation(player_kingdom["id"], kingdom["id"], relation - 4)
+        else:
+            kingdom["diplomacy_state"] = "neutral"
+            kingdom["war_state"] = false
+
+func _build_diplomacy_summary() -> String:
+    var player_kingdom := _get_player_kingdom()
+    var states := []
+    for kingdom in kingdom_data:
+        if kingdom["is_player"]:
+            continue
+        var relation := _get_relation_value(player_kingdom["id"], kingdom["id"])
+        states.append("%s:%s" % [kingdom["name"].substr(0, 4), kingdom["diplomacy_state"]])
+        if states.size() >= 4:
+            break
+    return "Diplomacy: %s" % ", ".join(states)
+
 func _spawn_initial_city_buildings() -> void:
     _place_building_for_type("farm", Vector3(-22, 0.0, 12))
     _place_building_for_type("house", Vector3(-15, 0.0, 12))
@@ -226,6 +322,8 @@ func _spawn_city_marker(city_data: Dictionary, color: Color) -> void:
     var city_root := Node3D.new()
     city_root.position = city_data["position"]
     city_root.name = "City_%s" % city_data["id"]
+    city_root.set_meta("owner_id", city_data["owner_id"])
+    city_root.set_meta("capture_progress", 0.0)
     terrain_root.add_child(city_root)
 
     var wall := MeshInstance3D.new()
@@ -338,6 +436,69 @@ func _get_nearest_player_target(unit: Node3D) -> Node3D:
 
     return best_target
 
+func _update_fog_of_war() -> void:
+    var revealed_positions: Array = []
+    for unit in player_units:
+        if is_instance_valid(unit):
+            revealed_positions.append(unit.global_position)
+    for building in buildings:
+        if is_instance_valid(building):
+            revealed_positions.append(building.global_position)
+
+    for enemy in enemy_units:
+        if not is_instance_valid(enemy):
+            continue
+        var visible := false
+        for position in revealed_positions:
+            if enemy.global_position.distance_to(position) <= FOG_VISIBILITY_RADIUS:
+                visible = true
+                break
+        enemy.visible = visible
+        enemy.modulate = Color(1, 1, 1, 1.0 if visible else 0.15)
+
+func _check_city_capture() -> void:
+    var player_kingdom := _get_player_kingdom()
+    for city_id in city_nodes:
+        var city_root: Node3D = city_nodes[city_id]
+        if city_root == null:
+            continue
+
+        var city_owner_id = int(city_root.get_meta("owner_id", -1))
+        if city_owner_id == player_kingdom["id"]:
+            continue
+
+        var enemy_kingdom := _get_kingdom_by_id(city_owner_id)
+        if enemy_kingdom.is_empty():
+            continue
+
+        var capture_progress := city_root.get_meta("capture_progress", 0.0)
+        var any_player_nearby := false
+        for unit in player_units:
+            if not is_instance_valid(unit):
+                continue
+            if unit.global_position.distance_to(city_root.global_position) <= CITY_CAPTURE_DISTANCE:
+                any_player_nearby = true
+                break
+
+        if any_player_nearby:
+            city_root.set_meta("capture_progress", capture_progress + 0.02)
+            if city_root.get_meta("capture_progress", 0.0) >= 1.0:
+                city_root.set_meta("owner_id", player_kingdom["id"])
+                city_root.set_meta("capture_progress", 0.0)
+                var wall_node := city_root.get_child(0)
+                if wall_node is MeshInstance3D:
+                    var wall_material := StandardMaterial3D.new()
+                    wall_material.albedo_color = player_kingdom["color"]
+                    wall_node.material_override = wall_material
+                var label_node := city_root.get_child(2)
+                if label_node is Label3D:
+                    label_node.modulate = player_kingdom["color"]
+                enemy_kingdom["territory"] = max(0, enemy_kingdom.get("territory", 0) - 1)
+                player_kingdom["territory"] += 1
+                _set_relation(player_kingdom["id"], enemy_kingdom["id"], -100)
+                enemy_kingdom["diplomacy_state"] = "war"
+                player_kingdom["gold"] += 5000
+
 func _spawn_unit_of_type(unit_type: String) -> void:
     if not _can_afford(UNIT_COSTS.get(unit_type, {})):
         return
@@ -400,16 +561,33 @@ func _get_unit_range(unit_type: String) -> float:
         _: return 2.0
 
 func _can_afford(cost: Dictionary) -> bool:
-    var player_kingdom = kingdom_data[0]
+    var player_kingdom = _get_player_kingdom()
     for key in cost.keys():
         if player_kingdom.get(key, 0) < int(cost[key]):
             return false
     return true
 
 func _pay_cost(cost: Dictionary) -> void:
-    var player_kingdom = kingdom_data[0]
+    var player_kingdom = _get_player_kingdom()
     for key in cost.keys():
         player_kingdom[key] = int(player_kingdom.get(key, 0)) - int(cost[key])
+
+func _place_building_for_type(building_type: String, position: Vector3) -> void:
+    if building_type == "":
+        return
+
+    var cost := BUILDING_COSTS.get(building_type, {})
+    if not _can_afford(cost):
+        return
+
+    _pay_cost(cost)
+    var building = building_scene.instantiate()
+    building.set_building_type(building_type)
+    building.global_position = position
+    world_root.add_child(building)
+    buildings.append(building)
+    active_build_type = ""
+    _update_ui()
 
 func format_number_display(value: int) -> String:
     if abs(value) >= 1000:
@@ -425,7 +603,7 @@ func format_number_display(value: int) -> String:
     return str(value)
 
 func _update_ui() -> void:
-    var player_kingdom = kingdom_data[0]
+    var player_kingdom = _get_player_kingdom()
     resource_label.text = (
         "Gold: %s | Food: %s | Wood: %s | Stone: %s | Iron: %s | Population: %s" % [
             format_number_display(player_kingdom["gold"]),
@@ -438,6 +616,10 @@ func _update_ui() -> void:
     )
     army_status_label.text = "Army: %s" % format_number_display(player_units.size())
     city_status_label.text = "City: Stonegate | Buildings: %s | Tax: %s%%" % [format_number_display(buildings.size()), str(player_kingdom.get("tax_rate", 15))]
+    objectives_label.text = "%s\n%s" % [
+        "Objectives\n- Build a prosperous kingdom\n- Explore the world\n- Conquer or dominate the realm",
+        _build_diplomacy_summary()
+    ]
 
 func save_game() -> void:
     var data := {
@@ -465,6 +647,7 @@ func load_game() -> void:
     if parsed and parsed.has("kingdoms"):
         kingdom_data = parsed["kingdoms"]
         day_phase = float(parsed.get("day_phase", 0.0))
+        _initialize_diplomacy()
         _update_ui()
 
 func _input(event: InputEvent) -> void:
@@ -500,23 +683,6 @@ func _raycast_ground(mouse_position: Vector2) -> Vector3:
     if is_nan(t) or is_inf(t):
         return Vector3.ZERO
     return from + dir * t
-
-func _place_building_for_type(building_type: String, position: Vector3) -> void:
-    if building_type == "":
-        return
-
-    var cost := BUILDING_COSTS.get(building_type, {})
-    if not _can_afford(cost):
-        return
-
-    _pay_cost(cost)
-    var building = building_scene.instantiate()
-    building.set_building_type(building_type)
-    building.global_position = position
-    world_root.add_child(building)
-    buildings.append(building)
-    active_build_type = ""
-    _update_ui()
 
 func _handle_left_click(mouse_position: Vector2) -> void:
     var camera := get_viewport().get_camera_3d()
@@ -602,3 +768,4 @@ func _on_barracks_button_pressed() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
     _input(event)
+
