@@ -15,6 +15,8 @@ const BUILDING_COSTS := {
     "lumber_camp": {"food": 0, "wood": 120, "stone": 60, "iron": 15},
     "quarry": {"food": 0, "wood": 120, "stone": 80, "iron": 20},
     "barracks": {"food": 0, "wood": 180, "stone": 120, "iron": 40},
+    "watchtower": {"food": 0, "wood": 160, "stone": 180, "iron": 60},
+    "keep": {"food": 0, "wood": 220, "stone": 240, "iron": 90},
 }
 const UNIT_COSTS := {
     "infantry": {"gold": 80, "food": 30, "wood": 20, "stone": 10, "iron": 20},
@@ -24,6 +26,7 @@ const UNIT_COSTS := {
 }
 const CITY_CAPTURE_DISTANCE := 5.0
 const FOG_VISIBILITY_RADIUS := 24.0
+const SEIGE_RANGE := 12.0
 
 var world_root: Node3D
 var terrain_root: Node3D
@@ -40,6 +43,10 @@ var rng := RandomNumberGenerator.new()
 var paused := false
 var day_phase := 0.0
 var recruitment_panel_visible := false
+var diplomacy_panel_visible := false
+var selected_enemy_kingdom_id: int = -1
+var city_panel_visible := false
+var save_version := 2
 
 @onready var resource_label: Label = $CanvasLayer/HUD/TopBar/ResourceLabel
 @onready var objectives_label: Label = $CanvasLayer/HUD/Objectives/ObjectivesLabel
@@ -50,16 +57,26 @@ var recruitment_panel_visible := false
 @onready var build_lumber_button: Button = $CanvasLayer/HUD/BuildPanel/LumberButton
 @onready var build_quarry_button: Button = $CanvasLayer/HUD/BuildPanel/QuarryButton
 @onready var build_barracks_button: Button = $CanvasLayer/HUD/BuildPanel/BarracksButton
+@onready var build_watchtower_button: Button = $CanvasLayer/HUD/BuildPanel/WatchtowerButton
+@onready var build_keep_button: Button = $CanvasLayer/HUD/BuildPanel/KeepButton
 @onready var recruit_button: Button = $CanvasLayer/HUD/BuildPanel/RecruitButton
+@onready var diplomacy_button: Button = $CanvasLayer/HUD/BuildPanel/DiplomacyButton
 @onready var recruit_panel: Panel = $CanvasLayer/HUD/RecruitPanel
+@onready var diplomacy_panel: Panel = $CanvasLayer/HUD/DiplomacyPanel
 @onready var recruit_infantry_button: Button = $CanvasLayer/HUD/RecruitPanel/InfantryButton
 @onready var recruit_archer_button: Button = $CanvasLayer/HUD/RecruitPanel/ArcherButton
 @onready var recruit_cavalry_button: Button = $CanvasLayer/HUD/RecruitPanel/CavalryButton
 @onready var recruit_knight_button: Button = $CanvasLayer/HUD/RecruitPanel/KnightButton
+@onready var diplomacy_list: VBoxContainer = $CanvasLayer/HUD/DiplomacyPanel/List
+@onready var diplomacy_message_label: Label = $CanvasLayer/HUD/DiplomacyPanel/MessageLabel
+@onready var city_panel: Panel = $CanvasLayer/HUD/CityPanel
 @onready var tax_slider: HSlider = $CanvasLayer/HUD/CityPanel/TaxSlider
 @onready var tax_value_label: Label = $CanvasLayer/HUD/CityPanel/TaxValue
 @onready var workers_slider: HSlider = $CanvasLayer/HUD/CityPanel/WorkersSlider
 @onready var workers_value_label: Label = $CanvasLayer/HUD/CityPanel/WorkersValue
+@onready var city_name_label: Label = $CanvasLayer/HUD/CityPanel/CityName
+@onready var ownership_label: Label = $CanvasLayer/HUD/CityPanel/Ownership
+@onready var kingdom_summary_label: Label = $CanvasLayer/HUD/CityPanel/KingdomSummary
 @onready var camera_rig: Node3D = $CameraRig
 
 func _ready() -> void:
@@ -75,6 +92,8 @@ func _ready() -> void:
     _connect_city_controls()
     _spawn_initial_city_buildings()
     recruit_panel.visible = false
+    diplomacy_panel.visible = false
+    city_panel.visible = false
     _update_ui()
 
 func _connect_build_buttons() -> void:
@@ -83,7 +102,10 @@ func _connect_build_buttons() -> void:
     build_lumber_button.pressed.connect(_on_lumber_button_pressed)
     build_quarry_button.pressed.connect(_on_quarry_button_pressed)
     build_barracks_button.pressed.connect(_on_barracks_button_pressed)
+    build_watchtower_button.pressed.connect(_on_watchtower_button_pressed)
+    build_keep_button.pressed.connect(_on_keep_button_pressed)
     recruit_button.pressed.connect(_toggle_recruit_panel)
+    diplomacy_button.pressed.connect(_toggle_diplomacy_panel)
 
 func _connect_recruit_buttons() -> void:
     recruit_infantry_button.pressed.connect(func(): _spawn_unit_of_type("infantry"))
@@ -111,6 +133,93 @@ func _toggle_recruit_panel() -> void:
     recruitment_panel_visible = !recruitment_panel_visible
     recruit_panel.visible = recruitment_panel_visible
 
+func _toggle_diplomacy_panel() -> void:
+    diplomacy_panel_visible = !diplomacy_panel_visible
+    diplomacy_panel.visible = diplomacy_panel_visible
+    if diplomacy_panel_visible:
+        _refresh_diplomacy_panel()
+
+func _refresh_diplomacy_panel() -> void:
+    for child in diplomacy_list.get_children():
+        child.queue_free()
+
+    var player_kingdom := _get_player_kingdom()
+    for kingdom in kingdom_data:
+        if kingdom["id"] == player_kingdom["id"]:
+            continue
+        var relation := _get_relation_value(player_kingdom["id"], kingdom["id"])
+        var row := HBoxContainer.new()
+        row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        var label := Label.new()
+        label.text = "%s (%s)" % [kingdom["name"], kingdom["diplomacy_state"]]
+        label.custom_minimum_size = Vector2(180, 0)
+        row.add_child(label)
+
+        var send_tribute := Button.new()
+        send_tribute.text = "Tribute"
+        send_tribute.pressed.connect(func(): _trigger_tribute(player_kingdom["id"], kingdom["id"]))
+        row.add_child(send_tribute)
+
+        var declare_war := Button.new()
+        declare_war.text = "War"
+        declare_war.pressed.connect(func(): _set_kingdom_relations(player_kingdom["id"], kingdom["id"], "war"))
+        row.add_child(declare_war)
+
+        var offer_alliance := Button.new()
+        offer_alliance.text = "Alliance"
+        offer_alliance.pressed.connect(func(): _set_kingdom_relations(player_kingdom["id"], kingdom["id"], "allied"))
+        row.add_child(offer_alliance)
+
+        var neutralize := Button.new()
+        neutralize.text = "Neutral"
+        neutralize.pressed.connect(func(): _set_kingdom_relations(player_kingdom["id"], kingdom["id"], "neutral"))
+        row.add_child(neutralize)
+
+        diplomacy_list.add_child(row)
+
+func _trigger_tribute(from_id: int, target_id: int) -> void:
+    var source := _get_kingdom_by_id(from_id)
+    var target := _get_kingdom_by_id(target_id)
+    if source.is_empty() or target.is_empty():
+        return
+    var tribute_amount := int(min(10000, source["gold"] * 0.05))
+    if tribute_amount <= 0:
+        return
+    source["gold"] -= tribute_amount
+    target["gold"] += tribute_amount
+    var relation := _get_relation_value(from_id, target_id)
+    _set_relation(from_id, target_id, relation + 10)
+    diplomacy_message_label.text = "Tribute sent: %s gold to %s." % [format_number_display(tribute_amount), target["name"]]
+
+func _set_kingdom_relations(source_id: int, target_id: int, state: String) -> void:
+    var source := _get_kingdom_by_id(source_id)
+    var target := _get_kingdom_by_id(target_id)
+    if source.is_empty() or target.is_empty():
+        return
+
+    match state:
+        "war":
+            source["diplomacy_state"] = "war"
+            target["diplomacy_state"] = "war"
+            _set_relation(source_id, target_id, -80)
+            source["war_state"] = true
+            target["war_state"] = true
+            diplomacy_message_label.text = "%s declared war on %s." % [source["name"], target["name"]]
+        "allied":
+            source["diplomacy_state"] = "allied"
+            target["diplomacy_state"] = "allied"
+            _set_relation(source_id, target_id, 75)
+            source["war_state"] = false
+            target["war_state"] = false
+            diplomacy_message_label.text = "%s formed an alliance with %s." % [source["name"], target["name"]]
+        "neutral":
+            source["diplomacy_state"] = "neutral"
+            target["diplomacy_state"] = "neutral"
+            _set_relation(source_id, target_id, 0)
+            source["war_state"] = false
+            target["war_state"] = false
+            diplomacy_message_label.text = "%s restored neutrality with %s." % [source["name"], target["name"]]
+
 func _process(delta: float) -> void:
     if paused:
         return
@@ -118,7 +227,9 @@ func _process(delta: float) -> void:
     day_phase += delta * 0.08
     _update_world_simulation(delta)
     _update_diplomacy(delta)
+    _run_ai_expansion_logic(delta)
     _check_city_capture()
+    _check_siege_warfare(delta)
     _update_fog_of_war()
     _update_ai_units(delta)
     _update_ui()
@@ -197,6 +308,7 @@ func _generate_kingdoms() -> void:
             "workers": 20,
             "diplomacy_state": "neutral",
             "war_state": false,
+            "expansion_threat": 0.0,
         }
 
         for city_index in range(1):
@@ -228,26 +340,24 @@ func _generate_kingdoms() -> void:
         player_kingdom["city_name"] = "Stonegate"
         objectives_label.text = "Objectives\n- Build a prosperous kingdom\n- Explore the world\n- Conquer or dominate the realm"
 
-    _initialize_diplomacy()
-
 func _initialize_diplomacy() -> void:
     for kingdom in kingdom_data:
-        kingdom["relations"] = {}
         for other in kingdom_data:
             if kingdom["id"] == other["id"]:
                 continue
             var relation_value := -15 + rng.randi_range(-30, 30)
-            if kingdom["is_player"]:
-                relation_value = -40 + rng.randi_range(0, 40)
-            if other["is_player"]:
-                relation_value = -40 + rng.randi_range(0, 40)
+            if kingdom["is_player"] or other["is_player"]:
+                relation_value = -20 + rng.randi_range(-20, 30)
             kingdom["relations"][str(other["id"])] = relation_value
-            if relation_value > 60:
-                kingdom["diplomacy_state"] = "allied"
-            elif relation_value < -30:
-                kingdom["diplomacy_state"] = "war"
-            else:
-                kingdom["diplomacy_state"] = "neutral"
+
+        if kingdom["is_player"]:
+            kingdom["diplomacy_state"] = "neutral"
+        elif kingdom["relations"].values().filter(func(value): return value < -30).size() > 0:
+            kingdom["diplomacy_state"] = "war"
+        elif kingdom["relations"].values().filter(func(value): return value > 60).size() > 0:
+            kingdom["diplomacy_state"] = "allied"
+        else:
+            kingdom["diplomacy_state"] = "neutral"
 
 func _get_player_kingdom() -> Dictionary:
     for kingdom in kingdom_data:
@@ -285,38 +395,50 @@ func _update_diplomacy(delta: float) -> void:
         if relation <= -30:
             kingdom["diplomacy_state"] = "war"
             kingdom["war_state"] = true
-            if rng.randf() < 0.02:
-                player_kingdom["gold"] -= 1200
-                kingdom["gold"] += 1200
-                _set_relation(player_kingdom["id"], kingdom["id"], relation + 8)
         elif relation >= 60:
             kingdom["diplomacy_state"] = "allied"
             kingdom["war_state"] = false
-            if rng.randf() < 0.03:
-                player_kingdom["gold"] += 800
-                kingdom["gold"] -= 800
-                _set_relation(player_kingdom["id"], kingdom["id"], relation - 4)
         else:
             kingdom["diplomacy_state"] = "neutral"
             kingdom["war_state"] = false
 
+        if kingdom["ai_goal"] == "expand" and rng.randf() < 0.02:
+            kingdom["expansion_threat"] = clamp(kingdom.get("expansion_threat", 0.0) + 0.1, 0.0, 1.0)
+        if kingdom["ai_goal"] == "defend" and rng.randf() < 0.015:
+            kingdom["military_power"] += 1
+
 func _build_diplomacy_summary() -> String:
     var player_kingdom := _get_player_kingdom()
-    var states := []
+    var entries := []
     for kingdom in kingdom_data:
         if kingdom["is_player"]:
             continue
         var relation := _get_relation_value(player_kingdom["id"], kingdom["id"])
-        states.append("%s:%s" % [kingdom["name"].substr(0, 4), kingdom["diplomacy_state"]])
-        if states.size() >= 4:
+        entries.append("%s:%s" % [kingdom["name"].substr(0, 4), kingdom["diplomacy_state"]])
+        if entries.size() >= 4:
             break
-    return "Diplomacy: %s" % ", ".join(states)
+    return "Diplomacy: %s" % ", ".join(entries)
+
+func _run_ai_expansion_logic(delta: float) -> void:
+    for kingdom in kingdom_data:
+        if kingdom["is_player"]:
+            continue
+        if kingdom["ai_goal"] == "expand" and rng.randf() < 0.03:
+            if kingdom["gold"] > 20000 and kingdom["military_power"] > 30:
+                kingdom["gold"] -= 4000
+                kingdom["territory"] += 1
+                kingdom["expansion_threat"] = clamp(kingdom["expansion_threat"] + 0.15, 0.0, 1.0)
+        elif kingdom["ai_goal"] == "defend" and rng.randf() < 0.025:
+            kingdom["military_power"] += 3
+        elif kingdom["ai_goal"] == "fortify" and rng.randf() < 0.02:
+            kingdom["steel"] = kingdom.get("stone", 0) + 250 if not kingdom.has("steel") else kingdom["steel"]
 
 func _spawn_initial_city_buildings() -> void:
     _place_building_for_type("farm", Vector3(-22, 0.0, 12))
     _place_building_for_type("house", Vector3(-15, 0.0, 12))
     _place_building_for_type("lumber_camp", Vector3(-18, 0.0, 16))
     _place_building_for_type("quarry", Vector3(-22, 0.0, 4))
+    _place_building_for_type("watchtower", Vector3(-12, 0.0, 18))
 
 func _spawn_city_marker(city_data: Dictionary, color: Color) -> void:
     var city_root := Node3D.new()
@@ -411,6 +533,7 @@ func _update_ai_units(delta: float) -> void:
     for enemy in enemy_units:
         if not is_instance_valid(enemy):
             continue
+
         var target := _get_nearest_player_target(enemy)
         if target == null:
             continue
@@ -455,6 +578,41 @@ func _update_fog_of_war() -> void:
                 break
         enemy.visible = visible
         enemy.modulate = Color(1, 1, 1, 1.0 if visible else 0.15)
+
+func _check_siege_warfare(delta: float) -> void:
+    for city_id in city_nodes:
+        var city_root: Node3D = city_nodes[city_id]
+        if city_root == null:
+            continue
+
+        var owner_id := int(city_root.get_meta("owner_id", -1))
+        if owner_id == _get_player_kingdom()["id"]:
+            continue
+
+        var enemy_kingdom := _get_kingdom_by_id(owner_id)
+        if enemy_kingdom.is_empty():
+            continue
+
+        var siege_units_nearby := false
+        for unit in player_units:
+            if not is_instance_valid(unit):
+                continue
+            if unit.global_position.distance_to(city_root.global_position) <= SEIGE_RANGE:
+                siege_units_nearby = true
+                break
+
+        if siege_units_nearby:
+            var garrison := city_root.get_meta("garrison", 20)
+            city_root.set_meta("garrison", max(0, garrison - 1))
+            if city_root.get_meta("garrison", 0) <= 0:
+                city_root.set_meta("owner_id", _get_player_kingdom()["id"])
+                city_root.set_meta("garrison", 20)
+                city_root.set_meta("capture_progress", 0.0)
+                enemy_kingdom["territory"] = max(0, enemy_kingdom.get("territory", 0) - 1)
+                _get_player_kingdom()["territory"] += 1
+                _set_relation(_get_player_kingdom()["id"], enemy_kingdom["id"], -100)
+                enemy_kingdom["diplomacy_state"] = "war"
+                _get_player_kingdom()["gold"] += 5000
 
 func _check_city_capture() -> void:
     var player_kingdom := _get_player_kingdom()
@@ -621,11 +779,23 @@ func _update_ui() -> void:
         _build_diplomacy_summary()
     ]
 
+    if city_panel_visible:
+        city_name_label.text = "City: Stonegate"
+        ownership_label.text = "Owner: %s" % player_kingdom["name"]
+        kingdom_summary_label.text = "Territory: %s | Wealth: %s | Army: %s" % [
+            player_kingdom["territory"],
+            format_number_display(player_kingdom["gold"]),
+            format_number_display(player_units.size())
+        ]
+
 func save_game() -> void:
     var data := {
+        "save_version": save_version,
         "kingdoms": kingdom_data,
         "day_phase": day_phase,
         "structures": buildings.size(),
+        "player_units": player_units.size(),
+        "enemy_units": enemy_units.size(),
     }
     var file := FileAccess.open("user://savegame.json", FileAccess.WRITE)
     if file:
@@ -647,6 +817,8 @@ func load_game() -> void:
     if parsed and parsed.has("kingdoms"):
         kingdom_data = parsed["kingdoms"]
         day_phase = float(parsed.get("day_phase", 0.0))
+        if not parsed.has("save_version"):
+            save_version = 1
         _initialize_diplomacy()
         _update_ui()
 
@@ -659,6 +831,10 @@ func _input(event: InputEvent) -> void:
 
     if event is InputEventKey and event.pressed and event.keycode == KEY_L:
         load_game()
+
+    if event is InputEventKey and event.pressed and event.keycode == KEY_C:
+        city_panel_visible = !city_panel_visible
+        city_panel.visible = city_panel_visible
 
     if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
         if active_build_type != "":
@@ -765,6 +941,12 @@ func _on_quarry_button_pressed() -> void:
 
 func _on_barracks_button_pressed() -> void:
     active_build_type = "barracks"
+
+func _on_watchtower_button_pressed() -> void:
+    active_build_type = "watchtower"
+
+func _on_keep_button_pressed() -> void:
+    active_build_type = "keep"
 
 func _unhandled_input(event: InputEvent) -> void:
     _input(event)
