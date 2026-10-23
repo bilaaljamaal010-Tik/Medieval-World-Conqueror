@@ -8,17 +8,22 @@ const STARTING_RESOURCES := {
     "stone": 1_000_000,
     "iron": 1_000_000,
 }
+const PLAYER_UNIT_COUNT := 10
 
 var world_root: Node3D
 var terrain_root: Node3D
 var kingdom_data: Array = []
 var city_nodes: Dictionary = {}
+var player_units: Array = []
+var selected_units: Array = []
+var unit_scene: PackedScene = preload("res://scenes/Unit.tscn")
 var rng := RandomNumberGenerator.new()
 var paused := false
 var day_phase := 0.0
 
 @onready var resource_label: Label = $CanvasLayer/HUD/TopBar/ResourceLabel
 @onready var objectives_label: Label = $CanvasLayer/HUD/Objectives/ObjectivesLabel
+@onready var army_status_label: Label = $CanvasLayer/HUD/BottomBar/ArmyStatusLabel
 @onready var camera_rig: Node3D = $CameraRig
 
 func _ready() -> void:
@@ -26,6 +31,7 @@ func _ready() -> void:
     world_root = $WorldRoot
     terrain_root = $WorldRoot/Terrain
     _generate_world()
+    _spawn_player_units()
     _update_ui()
 
 func _process(delta: float) -> void:
@@ -131,7 +137,6 @@ func _generate_kingdoms() -> void:
 
         kingdom_data.append(kingdom)
 
-    # Give the player a clear starting city and nearby neutral settlements.
     if kingdom_data.size() > 0:
         var player_kingdom = kingdom_data[0]
         player_kingdom["name"] = "Your Kingdom"
@@ -172,6 +177,20 @@ func _spawn_city_marker(city_data: Dictionary, color: Color) -> void:
 
     city_nodes[city_data["id"]] = city_root
 
+func _spawn_player_units() -> void:
+    for i in range(PLAYER_UNIT_COUNT):
+        var unit = unit_scene.instantiate()
+        unit.add_to_group("unit")
+        unit.team_id = 0
+        unit.unit_name = "Infantry"
+        unit.set_team_color(Color(0.1, 0.75, 0.3))
+        var radius := 3.0 + (i * 0.55)
+        var angle := TAU * float(i) / float(PLAYER_UNIT_COUNT)
+        var spawn_pos := Vector3(-18, 0.5, 8) + Vector3(cos(angle) * radius, 0.0, sin(angle) * radius)
+        unit.global_position = spawn_pos
+        world_root.add_child(unit)
+        player_units.append(unit)
+
 func _update_world_simulation(delta: float) -> void:
     for kingdom in kingdom_data:
         if kingdom["is_player"]:
@@ -180,16 +199,11 @@ func _update_world_simulation(delta: float) -> void:
             _simulate_ai_kingdom(kingdom, delta)
 
 func _simulate_player_kingdom(kingdom: Dictionary, delta: float) -> void:
-    var income := Vector3(
-        12.0,
-        15.0,
-        14.0,
-    )
-    kingdom["gold"] += int(income.x * delta * 20.0)
-    kingdom["food"] += int(income.y * delta * 20.0)
-    kingdom["wood"] += int(income.z * delta * 20.0)
-    kingdom["stone"] += int(income.x * delta * 12.0)
-    kingdom["iron"] += int(income.y * delta * 12.0)
+    kingdom["gold"] += int(12.0 * delta * 20.0)
+    kingdom["food"] += int(15.0 * delta * 20.0)
+    kingdom["wood"] += int(14.0 * delta * 20.0)
+    kingdom["stone"] += int(12.0 * delta * 12.0)
+    kingdom["iron"] += int(15.0 * delta * 12.0)
     kingdom["population"] += int(delta * 0.8)
 
 func _simulate_ai_kingdom(kingdom: Dictionary, delta: float) -> void:
@@ -200,18 +214,32 @@ func _simulate_ai_kingdom(kingdom: Dictionary, delta: float) -> void:
     kingdom["iron"] += int(rng.randi_range(25, 150) * delta)
     kingdom["military_power"] += int(rng.randi_range(0, 4) * delta)
 
+func format_number_display(value: int) -> String:
+    if abs(value) >= 1000:
+        var thousands := float(value) / 1000.0
+        var suffix := "k"
+        if value >= 1000000:
+            thousands = float(value) / 1000000.0
+            suffix = "m"
+        var text := String.num(thousands, 1)
+        if text.ends_with(".0"):
+            text = text.substr(0, text.length() - 2)
+        return text + suffix
+    return str(value)
+
 func _update_ui() -> void:
     var player_kingdom = kingdom_data[0]
     resource_label.text = (
-        "Gold: %d | Food: %d | Wood: %d | Stone: %d | Iron: %d | Population: %d" % [
-            player_kingdom["gold"],
-            player_kingdom["food"],
-            player_kingdom["wood"],
-            player_kingdom["stone"],
-            player_kingdom["iron"],
-            player_kingdom["population"],
+        "Gold: %s | Food: %s | Wood: %s | Stone: %s | Iron: %s | Population: %s" % [
+            format_number_display(player_kingdom["gold"]),
+            format_number_display(player_kingdom["food"]),
+            format_number_display(player_kingdom["wood"]),
+            format_number_display(player_kingdom["stone"]),
+            format_number_display(player_kingdom["iron"]),
+            format_number_display(player_kingdom["population"]),
         ]
     )
+    army_status_label.text = "Army: %s" % format_number_display(player_units.size())
 
 func save_game() -> void:
     var data := {
@@ -249,3 +277,65 @@ func _input(event: InputEvent) -> void:
 
     if event is InputEventKey and event.pressed and event.keycode == KEY_L:
         load_game()
+
+    if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+        _handle_left_click(event.position)
+
+    if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
+        _handle_right_click(event.position)
+
+func _handle_left_click(mouse_position: Vector2) -> void:
+    var camera := get_viewport().get_camera_3d()
+    var from := camera.project_ray_origin(mouse_position)
+    var to := from + camera.project_ray_normal(mouse_position) * 200.0
+    var query := PhysicsRayQueryParameters3D.create(from, to)
+    query.collide_with_areas = false
+    query.collide_with_bodies = true
+    var result := get_world_3d().direct_space_state.intersect_ray(query)
+
+    if result and result.has("collider") and is_instance_valid(result["collider"]):
+        var hit_node := result["collider"]
+        if hit_node.is_in_group("unit"):
+            _select_unit(hit_node)
+            return
+
+    _clear_selection()
+
+func _handle_right_click(mouse_position: Vector2) -> void:
+    var camera := get_viewport().get_camera_3d()
+    var from := camera.project_ray_origin(mouse_position)
+    var to := from + camera.project_ray_normal(mouse_position) * 200.0
+    var query := PhysicsRayQueryParameters3D.create(from, to)
+    query.collide_with_areas = false
+    query.collide_with_bodies = true
+    var result := get_world_3d().direct_space_state.intersect_ray(query)
+
+    if not result:
+        return
+
+    var target_position := result["position"]
+    if selected_units.is_empty():
+        return
+
+    for unit in selected_units:
+        if is_instance_valid(unit):
+            unit.move_to(target_position)
+
+func _select_unit(unit: Node) -> void:
+    for existing in selected_units:
+        if is_instance_valid(existing):
+            existing.set_selected(false)
+    selected_units.clear()
+    selected_units.append(unit)
+    unit.set_selected(true)
+    army_status_label.text = "Army: %s" % format_number_display(selected_units.size())
+
+func _clear_selection() -> void:
+    for existing in selected_units:
+        if is_instance_valid(existing):
+            existing.set_selected(false)
+    selected_units.clear()
+    army_status_label.text = "Army: %s" % format_number_display(player_units.size())
+
+func _unhandled_input(event: InputEvent) -> void:
+    _input(event)

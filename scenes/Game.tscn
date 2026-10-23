@@ -99,3 +99,13 @@ offset_top = 10.0
 offset_right = -14.0
 offset_bottom = -10.0
 text = "Tap and drag to pan • Mouse wheel or pinch to zoom • Hold right mouse button to rotate camera • Space to pause"
+
+[node name="ArmyStatusLabel" type="Label" parent="CanvasLayer/HUD/BottomBar"]
+anchors_preset = 11
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -180.0
+offset_top = 6.0
+offset_right = -18.0
+offset_bottom = 28.0
+text = "Army: 10"

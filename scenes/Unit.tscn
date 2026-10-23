@@ -1,0 +1,27 @@
+[gd_scene load_steps=4 format=3]
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_1"]
+radius = 0.38
+height = 0.9
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_1"]
+top_radius = 0.7
+bottom_radius = 0.7
+height = 0.04
+
+[sub_resource type="CylinderShape3D" id="CylinderShape3D_1"]
+radius = 0.55
+height = 1.0
+
+[node name="Unit" type="CharacterBody3D"]
+
+[node name="Body" type="MeshInstance3D" parent="."]
+mesh = SubResource("CapsuleMesh_1")
+
+[node name="SelectionRing" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.08, 0)
+mesh = SubResource("CylinderMesh_1")
+visible = false
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("CylinderShape3D_1")
