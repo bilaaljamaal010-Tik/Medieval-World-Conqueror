@@ -1,111 +1,84 @@
-[gd_scene load_steps=4 format=3 uid="uid://bpk4k1uq3n105"]
+extends CharacterBody3D
 
-[ext_resource type="Script" path="res://scripts/Game.gd" id="1_2k0ya"]
-[ext_resource type="Script" path="res://scripts/CameraRig.gd" id="2_lmq1w"]
+@export var move_speed: float = 6.0
+@export var max_hp: int = 30
+@export var attack_damage: int = 8
+@export var attack_range: float = 2.6
+@export var attack_cooldown: float = 0.9
 
-[node name="Game" type="Node3D"]
-script = ExtResource("1_2k0ya")
+var team_id: int = 0
+var unit_name: String = "Infantry"
+var is_enemy: bool = false
+var move_target: Vector3 = Vector3.ZERO
+var attack_target: Node3D = null
+var selected: bool = false
+var body_mesh: MeshInstance3D
+var selection_ring: MeshInstance3D
+var hp: int = max_hp
+var attack_timer: float = 0.0
 
-[node name="WorldRoot" type="Node3D" parent="."]
+func _ready() -> void:
+    add_to_group("unit")
+    body_mesh = $Body
+    selection_ring = $SelectionRing
+    selection_ring.visible = false
+    if body_mesh != null:
+        var material := StandardMaterial3D.new()
+        material.albedo_color = Color(0.1, 0.7, 0.3)
+        body_mesh.material_override = material
 
-[node name="Terrain" type="Node3D" parent="WorldRoot"]
+func set_team_color(color: Color) -> void:
+    if body_mesh != null:
+        var material := StandardMaterial3D.new()
+        material.albedo_color = color
+        body_mesh.material_override = material
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+func set_selected(value: bool) -> void:
+    selected = value
+    if selection_ring != null:
+        selection_ring.visible = value
 
-[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
-transform = Transform3D(0.866025, -0.5, 0, 0.5, 0.866025, 0, 0, 0, 1, 0, 18, 0)
-light_energy = 1.5
-shadow_enabled = true
+func move_to(world_position: Vector3) -> void:
+    move_target = world_position
+    attack_target = null
 
-[node name="CameraRig" type="Node3D" parent="."]
-script = ExtResource("2_lmq1w")
+func set_attack_target(target: Node3D) -> void:
+    attack_target = target
+    move_target = Vector3.ZERO
 
-[node name="Camera3D" type="Camera3D" parent="CameraRig"]
-transform = Transform3D(1, 0, 0, 0, 0.707106, 0.707107, 0, -0.707107, 0.707106, 0, 32, 32)
-current = true
-fov = 52.0
+func apply_damage(amount: int) -> void:
+    hp -= amount
+    if hp <= 0:
+        queue_free()
 
-[node name="CanvasLayer" type="CanvasLayer" parent="."]
+func _physics_process(delta: float) -> void:
+    if attack_target != null and is_instance_valid(attack_target):
+        var direction := attack_target.global_position - global_position
+        direction.y = 0.0
+        var distance := direction.length()
+        if distance <= attack_range:
+            attack_timer -= delta
+            if attack_timer <= 0.0:
+                attack_target.apply_damage(attack_damage)
+                attack_timer = attack_cooldown
+            velocity = Vector3.ZERO
+            move_and_slide()
+            return
 
-[node name="HUD" type="Control" parent="CanvasLayer"]
-layout_mode = 3
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
+    if move_target != Vector3.ZERO:
+        var direction := move_target - global_position
+        direction.y = 0.0
+        if direction.length() > 0.25:
+            velocity = direction.normalized() * move_speed
+            move_and_slide()
+        else:
+            velocity = Vector3.ZERO
+            move_target = Vector3.ZERO
+    else:
+        velocity = Vector3.ZERO
 
-[node name="TopBar" type="Panel" parent="CanvasLayer/HUD"]
-anchors_preset = 10
-anchor_right = 1.0
-offset_left = 12.0
-offset_top = 12.0
-offset_right = -12.0
-offset_bottom = 68.0
-grow_horizontal = 2
-
-[node name="ResourceLabel" type="Label" parent="CanvasLayer/HUD/TopBar"]
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = 16.0
-offset_top = 10.0
-offset_right = -16.0
-offset_bottom = -10.0
-text = "Gold: 0 | Food: 0 | Wood: 0 | Stone: 0 | Iron: 0 | Population: 0"
-
-[node name="Objectives" type="Panel" parent="CanvasLayer/HUD"]
-anchors_preset = 7
-anchor_left = 1.0
-anchor_top = 1.0
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = -260.0
-offset_top = -170.0
-offset_right = -18.0
-offset_bottom = -18.0
-grow_horizontal = 0
-grow_vertical = 0
-
-[node name="ObjectivesLabel" type="Label" parent="CanvasLayer/HUD/Objectives"]
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = 12.0
-offset_top = 12.0
-offset_right = -12.0
-offset_bottom = -12.0
-text = "Objectives\n- Expand your kingdom\n- secure food supply\n- bring the world under your rule"
-autowrap_mode = 3
-
-[node name="BottomBar" type="Panel" parent="CanvasLayer/HUD"]
-anchors_preset = 12
-anchor_top = 1.0
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = 12.0
-offset_top = -92.0
-offset_right = -12.0
-offset_bottom = -12.0
-grow_horizontal = 2
-grow_vertical = 0
-
-[node name="ActionsLabel" type="Label" parent="CanvasLayer/HUD/BottomBar"]
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = 14.0
-offset_top = 10.0
-offset_right = -14.0
-offset_bottom = -10.0
-text = "Tap and drag to pan • Mouse wheel or pinch to zoom • Hold right mouse button to rotate camera • Space to pause"
-
-[node name="ArmyStatusLabel" type="Label" parent="CanvasLayer/HUD/BottomBar"]
-anchors_preset = 11
-anchor_left = 1.0
-anchor_right = 1.0
-offset_left = -180.0
-offset_top = 6.0
-offset_right = -18.0
-offset_bottom = 28.0
-text = "Army: 10"
+func _process(delta: float) -> void:
+    if selected and selection_ring != null:
+        selection_ring.rotation_degrees.x = 90.0
+    if attack_timer > 0.0:
+        attack_timer = max(0.0, attack_timer - delta)
